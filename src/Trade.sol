@@ -387,23 +387,17 @@ contract Trade is ITrade {
     }
 
     function _decreasePosition(IStore.Order memory order, uint256 price, address keeper) internal {
+        
         IStore.Position memory position = store.getPosition(order.user, order.market);
+        IStore.Market memory market = store.getMarket(order.market);
 
         uint256 executedOrderSize = position.size > order.size ? order.size : position.size;
         uint256 remainingOrderSize = order.size - executedOrderSize;
-
-        uint256 remainingOrderMargin;
-        uint256 amountToReturnToUser;
 
         if (order.isReduceOnly) {
             // order.margin = 0
             // A fee (order.fee) corresponding to order.size was taken from balance on submit. Only fee corresponding to executedOrderSize should be charged, rest should be returned, if any
             store.incrementBalance(order.user, order.fee * remainingOrderSize / order.size);
-        } else {
-            // User submitted order.margin when sending the order. Refund the portion of order.margin that executes against the position
-            uint256 executedOrderMargin = order.margin * executedOrderSize / order.size;
-            amountToReturnToUser += executedOrderMargin;
-            remainingOrderMargin = order.margin - executedOrderMargin;
         }
 
         // Funding update
@@ -415,34 +409,20 @@ contract Trade is ITrade {
         (int256 pnl, int256 fundingFee) =
             _getPnL(order.market, position.isLong, price, position.price, executedOrderSize, position.fundingTracker);
 
-        uint256 executedPositionMargin = position.margin * executedOrderSize / position.size;
+        uint256 marginToFree = executedOrderSize / market.maxLeverage;
 
-        if (pnl <= -1 * int256(position.margin)) {
-            pnl = -1 * int256(position.margin);
-            executedPositionMargin = position.margin;
-            executedOrderSize = position.size;
-            position.size = 0;
-        } else {
-            position.margin -= executedPositionMargin;
-            position.size -= executedOrderSize;
-            position.fundingTracker = store.getFundingTracker(order.market);
-        }
+        position.size -= executedOrderSize;
+        position.fundingTracker = store.getFundingTracker(order.market);
 
         if (pnl < 0) {
             uint256 absPnl = uint256(-1 * pnl);
-
             // credit trader loss to pool
             pool.creditTraderLoss(order.user, order.market, absPnl);
-
-            if (absPnl < executedPositionMargin) {
-                amountToReturnToUser += executedPositionMargin - absPnl;
-            }
         } else {
             pool.debitTraderProfit(order.user, order.market, uint256(pnl));
-            amountToReturnToUser += executedPositionMargin;
         }
 
-        store.unlockMargin(order.user, amountToReturnToUser);
+        store.unlockMargin(order.user, marginToFree);
 
         if (position.size == 0) {
             store.removePosition(order.user, order.market);
@@ -458,7 +438,7 @@ contract Trade is ITrade {
                 orderId: 0,
                 user: order.user,
                 market: order.market,
-                margin: remainingOrderMargin,
+                margin: remainingOrderSize / market.maxLeverage,
                 size: remainingOrderSize,
                 price: 0,
                 isLong: order.isLong,
@@ -484,7 +464,7 @@ contract Trade is ITrade {
             order.market,
             order.isLong,
             executedOrderSize,
-            executedPositionMargin,
+            marginToFree,
             price,
             position.margin,
             position.size,
@@ -567,9 +547,6 @@ contract Trade is ITrade {
                 _updateFundingTracker(position.market);
                 store.removePosition(user, position.market);
 
-                store.unlockMargin(user, position.margin);
-                store.decrementBalance(user, position.margin);
-
                 uint256 chainlinkPrice = chainlink.getPrice(market.feed);
 
                 // Credit fees
@@ -586,6 +563,10 @@ contract Trade is ITrade {
                     liquidatorFee
                     );
             }
+
+            store.unlockMargin(user, store.getLockedMargin(user));
+            store.decrementBalance(user, store.getBalance(user));
+
         }
 
         // credit liquidator fees
