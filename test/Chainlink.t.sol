@@ -9,14 +9,14 @@ contract ChainlinkTest is Test {
     uint256 arbitrum;
     uint256 optimism;
     uint256 polygon;
-    uint256 bnb;
+    uint256 bsc;
     uint256 avalanche;
     uint256 fantom;
 
     string ARBITRUM_RPC_URL = vm.envString("ARBITRUM_RPC_URL");
     string OPTIMISM_RPC_URL = vm.envString("OPTIMISM_RPC_URL");
     string POLYGON_RPC_URL = vm.envString("POLYGON_RPC_URL");
-    string BNB_RPC_URL = vm.envString("BNB_RPC_URL");
+    string BSC_RPC_URL = vm.envString("BSC_RPC_URL");
     string AVAX_RPC_URL = vm.envString("AVAX_RPC_URL");
     string FANTOM_RPC_URL = vm.envString("FANTOM_RPC_URL");
 
@@ -26,7 +26,7 @@ contract ChainlinkTest is Test {
         arbitrum = vm.createFork(ARBITRUM_RPC_URL);
         optimism = vm.createFork(OPTIMISM_RPC_URL);
         polygon = vm.createFork(POLYGON_RPC_URL);
-        bnb = vm.createFork(BNB_RPC_URL);
+        bsc = vm.createFork(BSC_RPC_URL);
         avalanche = vm.createFork(AVAX_RPC_URL);
         fantom = vm.createFork(FANTOM_RPC_URL);
     }
@@ -39,7 +39,7 @@ contract ChainlinkTest is Test {
             optimism, "Optimism", 0x371EAD81c9102C9BF4874A9075FFFf170F2Ee389, 0xD702DD976Fb76Fffc2D3963D037dfDae5b04E593
         );
         _getPriceOnSidechain(polygon, "Polygon", 0xc907E116054Ad103354f2D350FD2514433D57F6f);
-        _getPriceOnSidechain(bnb, "Binance Smart Chain", 0x264990fbd0A4796A3E3d8E37C4d5F87a3aCa5Ebf);
+        _getPriceOnSidechain(bsc, "Binance Smart Chain", 0x264990fbd0A4796A3E3d8E37C4d5F87a3aCa5Ebf);
         _getPriceOnSidechain(avalanche, "Avalanche", 0x2779D32d5166BAaa2B2b658333bA7e6Ec0C65743);
         _getPriceOnSidechain(fantom, "Fantom", 0x8e94C22142F4A64b99022ccDd994f4e9EC86E4B4);
     }
