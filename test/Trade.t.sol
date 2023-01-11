@@ -17,8 +17,8 @@ contract TradeTest is TestUtils {
         // deposit 5000 USDC for trading
         trade.deposit(INITIAL_TRADE_DEPOSIT);
 
-        // submit ETH long with stop loss
-        trade.submitOrder(ethLong, 0, 4500 * UNIT);
+        // submit ETH long with stop loss 2% below entry 
+        trade.submitOrder(ethLong, 0, ETH_PRICE * 98 / 100);
 
         // console.log orders and positions? true = yes, false = no
         bool flag = false;
@@ -38,7 +38,7 @@ contract TradeTest is TestUtils {
         assertEq(_printUserPositions(user, flag), 1, "!positionCount");
 
         // set ETH price to SL price and execute SL order
-        chainlink.setPrice(ethFeed, 4500 * UNIT);
+        chainlink.setPrice(ethFeed, ETH_PRICE * 98 / 100);
         trade.executeOrders();
 
         // should be zero orders, zero positions
@@ -182,9 +182,9 @@ contract TradeTest is TestUtils {
 
         // submit three orders:
         // 1. eth long, is executable
-        // 2. take profit at 6000 USD
-        // 3. stop loss at 4000 USD
-        trade.submitOrder(ethLong, 6000 * UNIT, 4000 * UNIT);
+        // 2. take profit 2% above entry
+        // 3. stop loss at 2% below entry
+        trade.submitOrder(ethLong, ETH_PRICE * 102/100, ETH_PRICE * 98/100);
 
         // minSettlementTime is 1 minutes -> fast forward 2 minutes
         skip(2 minutes);
@@ -194,7 +194,7 @@ contract TradeTest is TestUtils {
         assertEq(orderIdsToExecute.length, 1);
 
         // set chainlinkprice above TP price
-        chainlink.setPrice(ethFeed, 6001 * UNIT);
+        chainlink.setPrice(ethFeed, ETH_PRICE * 102/100 + 1 * UNIT);
         orderIdsToExecute = trade.getExecutableOrderIds();
 
         // initial long order and TP order should be executable
@@ -203,7 +203,7 @@ contract TradeTest is TestUtils {
         assertEq(orderIdsToExecute.length, 2);
 
         // set chainlinkprice below SL price
-        chainlink.setPrice(ethFeed, 3999 * UNIT);
+        chainlink.setPrice(ethFeed, ETH_PRICE * 98/100 - 1 * UNIT);
         orderIdsToExecute = trade.getExecutableOrderIds();
 
         // initial long order and SL order should be executable
@@ -214,8 +214,8 @@ contract TradeTest is TestUtils {
 
     function testClosePositionWithoutProfit() public {
         trade.deposit(INITIAL_TRADE_DEPOSIT);
-        // submit order with stop loss 10% below current price and TP 20% above current price
-        trade.submitOrder(ethLong, 6000 * UNIT, 4500 * UNIT);
+        // submit long
+        trade.submitOrder(ethLong, 0, 0);
 
         // minSettlementTime is 1 minutes -> fast forward 2 minutes
         skip(2 minutes);
@@ -229,29 +229,64 @@ contract TradeTest is TestUtils {
 
     function testRevertClosePositionWithoutProfit() public {
         trade.deposit(INITIAL_TRADE_DEPOSIT);
-        // submit order with stop loss 10% below current price and TP 20% above current price
-        trade.submitOrder(ethLong, 6000 * UNIT, 4500 * UNIT);
+        // submit order with TP 2% above current price and stop loss 2% below current price
+        trade.submitOrder(ethLong, ETH_PRICE * 102/100, ETH_PRICE * 98/100);
 
         // minSettlementTime is 1 minutes -> fast forward 2 minutes
         skip(2 minutes);
         trade.executeOrders();
 
         // set ETH price below position price
-        chainlink.setPrice(ethFeed, 4999 * UNIT);
+        chainlink.setPrice(ethFeed, ETH_PRICE - 1 * UNIT);
 
         // call should revert since position is not in profit
         vm.expectRevert("pnl < 0");
         trade.closePositionWithoutProfit("ETH-USD");
     }
 
-    function testLiquidateUsers() public {
+    function testDecreasePosition() public {
         trade.deposit(INITIAL_TRADE_DEPOSIT);
-        // submit market long: size 10k, margin 2.5k
+        // submit market long: size 100k, margin 2k
         trade.submitOrder(ethLong, 0, 0);
         vm.stopPrank();
 
         uint256 orderFee = _getOrderFee("ETH-USD", ethLong.size);
-        IStore.Order memory order = store.getOrder(1);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        trade.executeOrders();
+
+        // ETH falls 2% below entry price (5000 * 98/100 = 4900)
+        chainlink.setPrice(ethFeed, ETH_PRICE * 98 / 100);
+
+        // upl = positionSize * (price - positionPrice) / positionPrice
+        // upl = 100k * (4.9k - 5k) / 5k = -2k
+        uint256 upl = 2000 * CURRENCY_UNIT;
+        assertEq(uint256(-1 * trade.getUpl(user)), upl, "!upl");
+
+        // close position
+        vm.prank(user);
+        trade.submitOrder(ethCloseLong, 0, 0);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        trade.executeOrders();
+
+        // user balance should be initial deposit - order fees (1x eth long, 1x close eth long) - upl (2k)
+        assertEq(store.getBalance(user), INITIAL_TRADE_DEPOSIT - 2 * orderFee - upl, "!balance");
+        // First call to Pool.creditTraderLoss, so trader loss goes to buffer
+        assertEq(store.bufferBalance(), upl, "!bufferBalance");
+    }
+
+    function testLiquidateUsers() public {
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+        // submit eth long, size 100k, margin 2k
+        trade.submitOrder(ethLong, 0, 0);
+        // submit btc long, size 100k, margin 2k
+        trade.submitOrder(btcLong, 0, 0);
+        vm.stopPrank();
+
+        uint256 orderFee = _getOrderFee("ETH-USD", ethLong.size) + _getOrderFee("BTC-USD", btcLong.size);
 
         // minSettlementTime is 1 minutes -> fast forward 2 minutes
         skip(2 minutes);
@@ -259,16 +294,16 @@ contract TradeTest is TestUtils {
 
         // liquidation when marginLevel < 20%
         // marginLevel = (INITIAL_TRADE_DEPOSIT - fee + P/L) / lockedMargin
-        // lockedMargin = 2k; INITIAL_TRADE_DEPOSIT - fee = 4900 USDC
-        // -> liquidation when unrealized P/L = -4500 USD -> ETH has to fall below 4775 USD
-        chainlink.setPrice(ethFeed, 4775 * UNIT);
+        // lockedMargin = 4k; INITIAL_TRADE_DEPOSIT - fee = 4800 USDC
+        // -> liquidation when unrealized P/L = -4000 USD -> ETH has to fall below 4800 USD
+        chainlink.setPrice(ethFeed, 4800 * UNIT);
 
         // ETH price is right at liquidation level, user shouldnt get liquidated yet
         address[] memory usersToLiquidate = trade.getLiquidatableUsers();
         assertEq(usersToLiquidate.length, 0);
 
-        chainlink.setPrice(ethFeed, 4774 * UNIT);
-        // ETH price is right below liquidation level
+        // set ETH price right below liquidation level
+        chainlink.setPrice(ethFeed, 4799 * UNIT);
         usersToLiquidate = trade.getLiquidatableUsers();
         assertEq(usersToLiquidate[0], user);
 
@@ -277,13 +312,15 @@ contract TradeTest is TestUtils {
         trade.liquidateUsers();
 
         // liquidation fee should have been credited to user2
-        assertEq(store.getBalance(user2), orderFee * store.keeperFeeShare() / BPS_DIVIDER);
+        uint256 liquidatorFee = orderFee * store.keeperFeeShare() / BPS_DIVIDER;
+        assertEq(store.getBalance(user2), liquidatorFee);
 
-        // user should have lost his margin
+        // buffer balance should be INITIAL_TRADE_DEPOSIT - fees
+        assertEq(store.bufferBalance(), INITIAL_TRADE_DEPOSIT - 2 * orderFee); // orderfee on open and close (liquidation)
+        // lockedMargin of user should be set to zero
         assertEq(store.getLockedMargin(user), 0);
-
-        // and balance should be INITIAL_DEPOSIT - order.fee - order.margin
-        assertEq(store.getBalance(user), INITIAL_TRADE_DEPOSIT - orderFee - order.margin);
+        // and balance should be zero
+        assertEq(store.getBalance(user), 0);
     }
 
     function testOpenInterestLong() public {

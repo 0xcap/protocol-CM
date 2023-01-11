@@ -75,6 +75,20 @@ contract TestUtils is SetupTest {
         timestamp: 0
     });
 
+    IStore.Order ethCloseLong = IStore.Order({
+        orderId: 0,
+        user: address(0),
+        market: "ETH-USD",
+        price: 0, // price doesnt matter, since ordertype = market
+        isLong: false,
+        isReduceOnly: true,
+        orderType: 0, // 0 = market, 1 = limit, 2 = stop
+        margin: 0, // reduceOnly order -> margin = 0
+        size: 100_000 * CURRENCY_UNIT,
+        fee: 0,
+        timestamp: 0
+    });
+
     // Helper functions
     function _submitAndExecuteOrders() internal {
         vm.startPrank(user);

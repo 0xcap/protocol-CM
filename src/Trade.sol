@@ -387,7 +387,6 @@ contract Trade is ITrade {
     }
 
     function _decreasePosition(IStore.Order memory order, uint256 price, address keeper) internal {
-        
         IStore.Position memory position = store.getPosition(order.user, order.market);
         IStore.Market memory market = store.getMarket(order.market);
 
@@ -528,12 +527,17 @@ contract Trade is ITrade {
 
     function liquidateUsers() external {
         address[] memory usersToLiquidate = getLiquidatableUsers();
+        uint256 userLength = usersToLiquidate.length;
         uint256 liquidatorFees;
 
-        for (uint256 i = 0; i < usersToLiquidate.length; i++) {
+        for (uint256 i = 0; i < userLength; i++) {
+            uint256 userFees;
+
             address user = usersToLiquidate[i];
             IStore.Position[] memory positions = store.getUserPositions(user);
-            for (uint256 j = 0; j < positions.length; j++) {
+            uint256 posLength = positions.length;
+
+            for (uint256 j = 0; j < posLength; j++) {
                 IStore.Position memory position = positions[j];
                 IStore.Market memory market = store.getMarket(position.market);
 
@@ -541,8 +545,8 @@ contract Trade is ITrade {
                 uint256 liquidatorFee = fee * store.keeperFeeShare() / BPS_DIVIDER;
                 fee -= liquidatorFee;
                 liquidatorFees += liquidatorFee;
+                userFees += fee + liquidatorFee;
 
-                pool.creditTraderLoss(user, position.market, position.margin - fee - liquidatorFee);
                 store.decrementOI(position.market, position.size, position.isLong);
                 _updateFundingTracker(position.market);
                 store.removePosition(user, position.market);
@@ -564,9 +568,11 @@ contract Trade is ITrade {
                     );
             }
 
+            // Credit full user balance minus fees
+            pool.creditTraderLoss(user, "all", store.getBalance(user) - userFees);
+            // set margin and user balance to zero
             store.unlockMargin(user, store.getLockedMargin(user));
             store.decrementBalance(user, store.getBalance(user));
-
         }
 
         // credit liquidator fees

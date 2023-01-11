@@ -110,6 +110,7 @@ contract Pool is IPool {
 
     function creditTraderLoss(address user, string memory market, uint256 amount) external onlyTrade {
         store.incrementBufferBalance(amount);
+        store.decrementBalance(user, amount);
 
         uint256 lastPaid = store.poolLastPaid();
         uint256 _now = block.timestamp;
@@ -129,8 +130,6 @@ contract Pool is IPool {
         store.incrementPoolBalance(amountToSendPool);
         store.decrementBufferBalance(amountToSendPool);
         store.setPoolLastPaid(_now);
-
-        store.decrementBalance(user, amount);
 
         emit PoolPayIn(user, market, amount, amountToSendPool, store.poolBalance(), store.bufferBalance());
     }
