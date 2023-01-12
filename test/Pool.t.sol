@@ -5,6 +5,14 @@ import "./utils/TestUtils.sol";
 
 contract PoolTest is TestUtils {
     // Events
+    event PoolPayIn(
+        address indexed user,
+        string market,
+        uint256 amount,
+        uint256 bufferToPoolAmount,
+        uint256 poolBalance,
+        uint256 bufferBalance
+    );
     event AddLiquidity(address indexed user, uint256 amount, uint256 clpAmount, uint256 poolBalance);
     event RemoveLiquidity(
         address indexed user, uint256 amount, uint256 feeAmount, uint256 clpAmount, uint256 poolBalance
@@ -20,11 +28,21 @@ contract PoolTest is TestUtils {
     function testCreditTraderLoss() public {
         // set ETH price to stop loss price, stop loss order should execute
         chainlink.setPrice(ethFeed, ETH_SL_PRICE);
-        trade.executeOrders();
+
+        // poolFee, needed for PoolPayIn event
+        uint256 fee = _getOrderFee("ETH-USD", ethLong.size) + _getOrderFee("BTC-USD", btcLong.size);
+        uint256 keeperFee = fee * store.keeperFeeShare() / BPS_DIVIDER;
+        fee -= keeperFee;
+        uint256 poolFee = fee * store.poolFeeShare() / BPS_DIVIDER;
 
         // ETH went down 2%, position size was 100k, so user lost 2k
         // poolLastPaid = 0, so full amount should be used to increment Buffer balance
-        assertEq(store.bufferBalance(), 2000 * CURRENCY_UNIT, "!bufferBalance");
+        vm.expectEmit(true, true, true, true);
+        emit PoolPayIn(user, "ETH-USD", 2000 * CURRENCY_UNIT, 0, poolFee, 2000 * CURRENCY_UNIT);
+        trade.executeOrders();
+
+        // poolLastPaid, needed for amountToSendPool calculation
+        uint256 lastPaid = store.poolLastPaid();
 
         // fast forward one day
         skip(1 days);
@@ -35,16 +53,10 @@ contract PoolTest is TestUtils {
 
         // BTC went down 2%, position size was 100k, so user lost 2k -> bufferBalance = 4k USDC
         // we fast forwarded one day, so amountToSendPool = 4k USDC * 1/7 = 571.43
+        uint256 amountToSendPool = 4000 * CURRENCY_UNIT * (block.timestamp - lastPaid) / store.bufferPayoutPeriod();
 
-        // buffer balance should be reduced
-        assertApproxEqRel(
-            store.bufferBalance(),
-            (4000 - 571) * CURRENCY_UNIT,
-            0.01 * 1e18,
-            "bufferBalance != 4000 USDC - amountToSendPool"
-        );
-        // pool balance should be amountToSendPool + fees
-        assertGt(store.poolBalance(), 571 * CURRENCY_UNIT, "!(poolBalance > amountToSendPool)");
+        assertEq(store.bufferBalance(), 4000 * CURRENCY_UNIT - amountToSendPool, "!bufferBalance");
+        assertEq(store.poolBalance(), amountToSendPool + 2 * poolFee, "!poolBalance");
     }
 
     function testDebitTraderProfit() public {

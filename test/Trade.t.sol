@@ -13,11 +13,31 @@ contract TradeTest is TestUtils {
         vm.startPrank(user);
     }
 
+    function testSubmitOrderMaxSize() public {
+        IStore.Market memory market = store.getMarket("ETH-USD");
+
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // submit ETH long with size = amount
+        ethLong.size = INITIAL_TRADE_DEPOSIT * market.maxLeverage;
+        trade.submitOrder(ethLong, 0, 0);
+
+        IStore.Order[] memory _orders = store.getOrders();
+
+        assertEq(_orders.length, 1, "!orderLength");
+
+        // taking order fees into account, equity is now below lockedMargin
+        // submitting new orders shouldnt be possible
+        vm.expectRevert("!equity");
+        trade.submitOrder(btcLong, 0, 0);
+    }
+
     function testOrderAndPositionStorage() public {
         // deposit 5000 USDC for trading
         trade.deposit(INITIAL_TRADE_DEPOSIT);
 
-        // submit ETH long with stop loss 2% below entry 
+        // submit ETH long with stop loss 2% below entry
         trade.submitOrder(ethLong, 0, ETH_PRICE * 98 / 100);
 
         // console.log orders and positions? true = yes, false = no
@@ -81,25 +101,6 @@ contract TradeTest is TestUtils {
         // submitting new orders shouldnt be possible
         vm.expectRevert("!equity");
         trade.submitOrder(ethLong, 0, 0);
-    }
-
-    /// @param amount deposit amount
-    function testFuzzDepositAndWithdraw(uint256 amount) public {
-        vm.assume(amount > 1 && amount <= INITIAL_BALANCE);
-
-        // expect Deposit event
-        vm.expectEmit(true, true, true, true);
-        emit Deposit(user, amount);
-        trade.deposit(amount);
-
-        // balance should be equal to amount
-        assertEq(store.getBalance(user), amount, "!userBalance");
-        assertEq(IERC20(usdc).balanceOf(address(store)), amount, "!storeBalance");
-
-        // expect withdraw event
-        vm.expectEmit(true, true, true, true);
-        emit Withdraw(user, amount);
-        trade.withdraw(amount);
     }
 
     function testRevertWithdraw() public {
@@ -184,7 +185,7 @@ contract TradeTest is TestUtils {
         // 1. eth long, is executable
         // 2. take profit 2% above entry
         // 3. stop loss at 2% below entry
-        trade.submitOrder(ethLong, ETH_PRICE * 102/100, ETH_PRICE * 98/100);
+        trade.submitOrder(ethLong, ETH_PRICE * 102 / 100, ETH_PRICE * 98 / 100);
 
         // minSettlementTime is 1 minutes -> fast forward 2 minutes
         skip(2 minutes);
@@ -194,7 +195,7 @@ contract TradeTest is TestUtils {
         assertEq(orderIdsToExecute.length, 1);
 
         // set chainlinkprice above TP price
-        chainlink.setPrice(ethFeed, ETH_PRICE * 102/100 + 1 * UNIT);
+        chainlink.setPrice(ethFeed, ETH_PRICE * 102 / 100 + 1 * UNIT);
         orderIdsToExecute = trade.getExecutableOrderIds();
 
         // initial long order and TP order should be executable
@@ -203,7 +204,7 @@ contract TradeTest is TestUtils {
         assertEq(orderIdsToExecute.length, 2);
 
         // set chainlinkprice below SL price
-        chainlink.setPrice(ethFeed, ETH_PRICE * 98/100 - 1 * UNIT);
+        chainlink.setPrice(ethFeed, ETH_PRICE * 98 / 100 - 1 * UNIT);
         orderIdsToExecute = trade.getExecutableOrderIds();
 
         // initial long order and SL order should be executable
@@ -223,14 +224,14 @@ contract TradeTest is TestUtils {
 
         trade.closePositionWithoutProfit("ETH-USD");
 
-        // user should have margin back
+        // users margin should be zero
         assertEq(store.getLockedMargin(user), 0);
     }
 
     function testRevertClosePositionWithoutProfit() public {
         trade.deposit(INITIAL_TRADE_DEPOSIT);
         // submit order with TP 2% above current price and stop loss 2% below current price
-        trade.submitOrder(ethLong, ETH_PRICE * 102/100, ETH_PRICE * 98/100);
+        trade.submitOrder(ethLong, ETH_PRICE * 102 / 100, ETH_PRICE * 98 / 100);
 
         // minSettlementTime is 1 minutes -> fast forward 2 minutes
         skip(2 minutes);
@@ -272,10 +273,100 @@ contract TradeTest is TestUtils {
         skip(2 minutes);
         trade.executeOrders();
 
+        // locked margin should be zero
+        assertEq(store.getLockedMargin(user), 0, "!margin");
         // user balance should be initial deposit - order fees (1x eth long, 1x close eth long) - upl (2k)
         assertEq(store.getBalance(user), INITIAL_TRADE_DEPOSIT - 2 * orderFee - upl, "!balance");
         // First call to Pool.creditTraderLoss, so trader loss goes to buffer
         assertEq(store.bufferBalance(), upl, "!bufferBalance");
+    }
+
+    function testDecreasePositionHalf() public {
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+        // submit market long: size 100k, margin 2k
+        trade.submitOrder(ethLong, 0, 0);
+        vm.stopPrank();
+
+        uint256 orderFee = _getOrderFee("ETH-USD", ethLong.size);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        trade.executeOrders();
+
+        // ETH falls 2% below entry price (5000 * 98/100 = 4900)
+        chainlink.setPrice(ethFeed, ETH_PRICE * 98 / 100);
+
+        // upl = positionSize * (price - positionPrice) / positionPrice
+        // upl = 100k * (4.9k - 5k) / 5k = -2k
+        uint256 upl = 2000 * CURRENCY_UNIT;
+        assertEq(uint256(-1 * trade.getUpl(user)), upl, "!upl");
+
+        // close 50% of position
+        vm.prank(user);
+        ethCloseLong.size = ethLong.size / 2;
+        trade.submitOrder(ethCloseLong, 0, 0);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        trade.executeOrders();
+
+        IStore.Market memory market = store.getMarket("ETH-USD");
+        uint256 orderFeeClose = _getOrderFee("ETH-USD", ethLong.size / 2);
+
+        // locked margin should be half of initial margin
+        assertEq(store.getLockedMargin(user), (ethLong.size / 2) / market.maxLeverage, "!margin");
+        // user balance should be initial deposit - order fees (1x eth long, 1x close eth long) - upl/2 (1k)
+        assertEq(store.getBalance(user), INITIAL_TRADE_DEPOSIT - orderFee - orderFeeClose - upl / 2, "!balance");
+        // First call to Pool.creditTraderLoss, so realized trader loss goes to buffer
+        assertEq(store.bufferBalance(), upl / 2, "!bufferBalance");
+    }
+
+    function testDecreaseHalfAndClosePosition() public {
+        testDecreasePositionHalf();
+
+        // trade is now in profit
+        chainlink.setPrice(ethFeed, ETH_PRICE * 102 / 100);
+
+        // half of position is still open
+        vm.prank(user);
+        trade.closePositionWithoutProfit("ETH-USD");
+
+        // locked margin should be zero
+        assertEq(store.getLockedMargin(user), 0, "!margin");
+    }
+
+    function testDecreasePositionDouble() public {
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+        // submit market long: size 50k
+        ethLong.size = 50_000 * CURRENCY_UNIT;
+        trade.submitOrder(ethLong, 0, 0);
+        vm.stopPrank();
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        trade.executeOrders();
+
+        // open another position double the size in opposite direction (-> 100k short)
+        vm.prank(user);
+        ethShort.size = ethLong.size * 2;
+        trade.submitOrder(ethShort, 0, 0);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        trade.executeOrders();
+
+        IStore.Order[] memory _orders = store.getOrders();
+        IStore.Position[] memory _positions = store.getUserPositions(user);
+
+        // initial long position should be removed, 50k short position should remain
+        assertEq(_orders.length, 0, "!orderLength");
+        assertEq(_positions.length, 1, "!positionLength");
+
+        assertEq(_positions[0].isLong, false, "!position.isLong");
+        assertEq(_positions[0].size, ethShort.size - ethLong.size, "!position.size");
+
+        //_printOrders(true);
+        //_printUserPositions(user, true);
     }
 
     function testLiquidateUsers() public {
@@ -379,5 +470,42 @@ contract TradeTest is TestUtils {
         // accruedFunding = UNIT * 5000 * 10k * CURRENCY_UNIT * 24 / (24 * 365 * 10k * CURRENCY_UNIT)
         // accruedFunding = UNIT * 5000 / 365 = 13698630136986301369 (or 0xbe1b4f87f88773b9 in hex)
         assertEq(trade.getAccruedFunding("ETH-USD", 0), 13698630136986301369);
+    }
+
+    // Fuzz tests
+    /// @param amount deposit amount
+    function testFuzzDepositAndWithdraw(uint256 amount) public {
+        vm.assume(amount > 1 && amount <= INITIAL_BALANCE);
+
+        // expect Deposit event
+        vm.expectEmit(true, true, true, true);
+        emit Deposit(user, amount);
+        trade.deposit(amount);
+
+        // balance should be equal to amount
+        assertEq(store.getBalance(user), amount, "!userBalance");
+        assertEq(IERC20(usdc).balanceOf(address(store)), amount, "!storeBalance");
+
+        // expect withdraw event
+        vm.expectEmit(true, true, true, true);
+        emit Withdraw(user, amount);
+        trade.withdraw(amount);
+    }
+
+    function testFuzzSubmitOrder(uint256 amount) public {
+        IStore.Market memory market = store.getMarket("ETH-USD");
+        vm.assume(amount > market.minSize && amount <= INITIAL_TRADE_DEPOSIT * market.maxLeverage);
+
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // submit ETH long with size = amount
+        ethLong.size = amount;
+        trade.submitOrder(ethLong, 0, 0);
+
+        IStore.Order[] memory _orders = store.getOrders();
+
+        assertEq(_orders.length, 1, "!orderLength");
+        assertEq(_orders[0].size, amount, "!orderAmount");
     }
 }
