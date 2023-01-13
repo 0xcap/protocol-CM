@@ -114,22 +114,22 @@ contract Pool is IPool {
 
         uint256 lastPaid = store.poolLastPaid();
         uint256 _now = block.timestamp;
+        uint256 amountToSendPool;
 
         if (lastPaid == 0) {
             store.setPoolLastPaid(_now);
-            return;
+        } else {
+            uint256 bufferBalance = store.bufferBalance();
+            uint256 bufferPayoutPeriod = store.bufferPayoutPeriod();
+
+            amountToSendPool = bufferBalance * (block.timestamp - lastPaid) / bufferPayoutPeriod;
+
+            if (amountToSendPool > bufferBalance) amountToSendPool = bufferBalance;
+
+            store.incrementPoolBalance(amountToSendPool);
+            store.decrementBufferBalance(amountToSendPool);
+            store.setPoolLastPaid(_now);
         }
-
-        uint256 bufferBalance = store.bufferBalance();
-        uint256 bufferPayoutPeriod = store.bufferPayoutPeriod();
-
-        uint256 amountToSendPool = bufferBalance * (block.timestamp - lastPaid) / bufferPayoutPeriod;
-
-        if (amountToSendPool > bufferBalance) amountToSendPool = bufferBalance;
-
-        store.incrementPoolBalance(amountToSendPool);
-        store.decrementBufferBalance(amountToSendPool);
-        store.setPoolLastPaid(_now);
 
         emit PoolPayIn(user, market, amount, amountToSendPool, store.poolBalance(), store.bufferBalance());
     }

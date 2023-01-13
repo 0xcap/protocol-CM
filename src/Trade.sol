@@ -411,6 +411,7 @@ contract Trade is ITrade {
         uint256 marginToFree = executedOrderSize / market.maxLeverage;
 
         position.size -= executedOrderSize;
+        position.margin -= marginToFree;
         position.fundingTracker = store.getFundingTracker(order.market);
 
         if (pnl < 0) {
