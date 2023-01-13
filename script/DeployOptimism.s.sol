@@ -10,7 +10,7 @@ import "../src/Chainlink.sol";
 
 import "./Config.sol";
 
-contract DeployArbitrum is Config {
+contract DeployOptimism is Config {
     Trade public trade;
     Pool public pool;
     Store public store;
@@ -20,7 +20,7 @@ contract DeployArbitrum is Config {
 
     function run() public {
         // create fork
-        arbitrum = vm.createFork(ARBITRUM_RPC_URL);
+        optimism = vm.createFork(OPTIMISM_RPC_URL);
 
         // private key for deployment
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -30,17 +30,7 @@ contract DeployArbitrum is Config {
         // for WETH (or any other token with 18 decimals) as base currency, use _deployBaseWETH
         // and replace fourth function argument, e.g. ARB_USDC -> ARB_WETH
         _deployBaseUSDC(
-            arbitrum,
-            pk,
-            ARB_SEQ,
-            ARB_USDC,
-            ARB_ETHUSD,
-            ARB_BTCUSD,
-            swapRouter,
-            quoter,
-            ARB_WETH,
-            vm.addr(pk),
-            vm.addr(pk)
+            optimism, pk, OP_SEQ, OP_USDC, OP_ETHUSD, OP_BTCUSD, swapRouter, quoter, OP_WETH, vm.addr(pk), vm.addr(pk)
         );
 
         console.log("Contracts deployed");

@@ -10,7 +10,7 @@ import "../src/Store.sol";
 import "../src/CLP.sol";
 import "../src/Chainlink.sol";
 
-contract DeployProd is Script {
+contract DeployMultichain is Script {
     uint256 public constant CURRENCY_UNIT = 10 ** 6;
 
     /* ========== FORK CONFIG ========== */

@@ -10,7 +10,7 @@ import "../src/Chainlink.sol";
 
 import "./Config.sol";
 
-contract DeployArbitrum is Config {
+contract DeployBSC is Config {
     Trade public trade;
     Pool public pool;
     Store public store;
@@ -20,7 +20,7 @@ contract DeployArbitrum is Config {
 
     function run() public {
         // create fork
-        arbitrum = vm.createFork(ARBITRUM_RPC_URL);
+        bsc = vm.createFork(BSC_RPC_URL);
 
         // private key for deployment
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -30,15 +30,15 @@ contract DeployArbitrum is Config {
         // for WETH (or any other token with 18 decimals) as base currency, use _deployBaseWETH
         // and replace fourth function argument, e.g. ARB_USDC -> ARB_WETH
         _deployBaseUSDC(
-            arbitrum,
+            bsc,
             pk,
-            ARB_SEQ,
-            ARB_USDC,
-            ARB_ETHUSD,
-            ARB_BTCUSD,
-            swapRouter,
-            quoter,
-            ARB_WETH,
+            address(0), // no sequencer needed
+            BSC_USDC,
+            BSC_ETHUSD,
+            BSC_BTCUSD,
+            address(0), // no uniswap support on bsc
+            address(0), // no uniswap support on bsc
+            address(0), // no uniswap support on bsc
             vm.addr(pk),
             vm.addr(pk)
         );
