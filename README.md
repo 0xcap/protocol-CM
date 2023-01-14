@@ -59,7 +59,11 @@ Set environment variables in .env and load them with
 ```
 source .env
 ```
-Then run the deploy script
+Example command to deploy and verify contracts on Arbitrum:
 ```
-forge script script/DeployProd.sol:DeployProd --broadcast --verify -vvvv
+forge script DeployArbitrum --broadcast --verify --etherscan-api-key $ARBITRUM_ETHERSCAN_KEY -vvvv
+```
+To run a simulation
+```
+forge script DeployArbitrum -vvvv
 ```
