@@ -1,22 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "forge-std/Script.sol";
-
 import "../src/interfaces/IStore.sol";
 import "../src/Trade.sol";
 
-contract UpdateTrade is Script {
-    /* ========== FORK CONFIG ========== */
-    uint256 arbitrum;
+import "./Config.sol";
 
-    string ARBITRUM_RPC_URL = vm.envString("ARBITRUM_RPC_URL");
-
-    /* ========== DEPLOYMENT ADDRESSES ========== */
-    // Deployment addresses for USDC
-    address ARB_USDC = address(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
-
-    /* ========== CONTRACTS ========== */
+contract UpdateTrade is Config {
     Trade public trade;
 
     address public pool = address(0x3E4CdcDC5E3F46DCe516adB428d107CE62A6D24a);
@@ -24,7 +14,6 @@ contract UpdateTrade is Script {
     address public clp = address(0xFc4351357748d03CC938807e68A725E445C44995);
     address public chainlink = address(0x4CA8c060EBFBcF82111c5dA3a2619A8C71B12C96);
 
-    /* ========== METHODS ========== */
     function run() public {
         // create fork
         arbitrum = vm.createSelectFork(ARBITRUM_RPC_URL);
@@ -48,6 +37,7 @@ contract UpdateTrade is Script {
 
         // Link contracts
         IStore(store).link(address(trade), pool, usdc, clp);
+        IPool(pool).link(address(trade), store, _treasury);
         trade.link(chainlink, pool, store);
 
         vm.stopBroadcast();

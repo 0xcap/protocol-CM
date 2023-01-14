@@ -30,6 +30,8 @@ interface IPool {
 
     function debitTraderProfit(address user, string memory market, uint256 amount) external;
 
+    function link(address _trade, address _store, address _treasury) external;
+
     function removeLiquidity(uint256 amount) external;
 
     function updateGov(address _gov) external;

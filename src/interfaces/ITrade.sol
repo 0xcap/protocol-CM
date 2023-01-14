@@ -64,10 +64,6 @@ interface ITrade {
     );
     event Withdraw(address indexed user, uint256 amount);
 
-    function BPS_DIVIDER() external view returns (uint256);
-
-    function UNIT() external view returns (uint256);
-
     function cancelOrder(uint256 orderId) external;
 
     function cancelOrders(uint256[] memory orderIds) external;
@@ -96,8 +92,6 @@ interface ITrade {
         external
         view
         returns (IStore.Position[] memory _positions, int256[] memory _upls);
-
-    function gov() external view returns (address);
 
     function link(address _chainlink, address _pool, address _store) external;
 

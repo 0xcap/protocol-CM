@@ -62,10 +62,6 @@ interface IStore {
 
     function burnCLP(address user, uint256 amount) external;
 
-    function clp() external view returns (address);
-
-    function currency() external view returns (address);
-
     function decrementBalance(address user, uint256 amount) external;
 
     function decrementBufferBalance(uint256 amount) external;
@@ -114,8 +110,6 @@ interface IStore {
 
     function getUsersWithLockedMarginLength() external view returns (uint256);
 
-    function gov() external view returns (address);
-
     function incrementBalance(address user, uint256 amount) external;
 
     function incrementBufferBalance(uint256 amount) external;
@@ -138,8 +132,6 @@ interface IStore {
 
     function mintCLP(address user, uint256 amount) external;
 
-    function pool() external view returns (address);
-
     function poolBalance() external view returns (uint256);
 
     function poolFeeShare() external view returns (uint256);
@@ -147,8 +139,6 @@ interface IStore {
     function poolLastPaid() external view returns (uint256);
 
     function poolWithdrawalFee() external view returns (uint256);
-
-    function quoter() external view returns (address);
 
     function removeOrder(uint256 _orderId) external;
 
@@ -175,10 +165,6 @@ interface IStore {
         payable
         returns (uint256 amountOut);
 
-    function swapRouter() external view returns (address);
-
-    function trade() external view returns (address);
-
     function transferIn(address user, uint256 amount) external;
 
     function transferOut(address user, uint256 amount) external;
@@ -190,6 +176,4 @@ interface IStore {
     function updateGov(address _gov) external;
 
     function updateOrder(Order memory order) external;
-
-    function weth() external view returns (address);
 }
