@@ -257,6 +257,11 @@ contract Trade is ITrade {
         IStore.Order memory order = store.getOrder(orderId);
         require(order.user == msg.sender, "!user");
         require(order.size > 0, "!order");
+        _cancelOrder(orderId);
+    }
+
+    function _cancelOrder(uint256 orderId) internal {
+        IStore.Order memory order = store.getOrder(orderId);
 
         if (!order.isReduceOnly) {
             store.unlockMargin(order.user, order.margin);
@@ -331,7 +336,7 @@ contract Trade is ITrade {
         } else if (doReduce) {
             _decreasePosition(order, price, keeper);
         } else {
-            cancelOrder(order.orderId);
+            _cancelOrder(order.orderId);
         }
     }
 
