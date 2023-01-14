@@ -257,7 +257,6 @@ contract Trade is ITrade {
         IStore.Order memory order = store.getOrder(orderId);
         require(order.user == msg.sender, "!user");
         require(order.size > 0, "!order");
-        require(order.orderType != 0, "!market-order");
 
         if (!order.isReduceOnly) {
             store.unlockMargin(order.user, order.margin);
