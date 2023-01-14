@@ -331,6 +331,8 @@ contract Trade is ITrade {
             _increasePosition(order, price, keeper);
         } else if (doReduce) {
             _decreasePosition(order, price, keeper);
+        } else {
+            cancelOrder(order.orderId);
         }
     }
 
