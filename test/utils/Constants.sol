@@ -4,6 +4,7 @@ pragma solidity ^0.8.13;
 import "forge-std/Test.sol";
 
 contract Constants is Test {
+    uint256 public constant MAX_UINT256 = 2 ** 256 - 1;
     uint256 public constant UNIT = 10 ** 18;
     uint256 public constant BPS_DIVIDER = 10000;
     uint256 public constant CURRENCY_UNIT = 10 ** 6;

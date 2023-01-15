@@ -69,18 +69,31 @@ contract Trade is ITrade {
     }
 
     function withdraw(uint256 amount) external {
-        require(amount > 0, "!amount");
         address user = msg.sender;
-        store.decrementBalance(user, amount);
 
-        // check equity
+        // if amount to withdraw > balance, set it to balance
+        uint256 balance = store.getBalance(user);
+        if (amount > balance) amount = balance;
+
+        // equity after withdraw
         int256 upl = getUpl(user);
-        uint256 balance = store.getBalance(user); // balance after decrement
-        int256 equity = int256(balance) + upl;
         uint256 lockedMargin = store.getLockedMargin(user);
+        int256 equity = int256(balance - amount) + upl; 
 
-        require(int256(lockedMargin) <= equity, "!equity");
+        // adjust amount if equity after withdrawing < lockedMargin
+        if (equity < int256(lockedMargin)) {
+            int256 maxWithdrawableAmount;
+            maxWithdrawableAmount = int256(balance) - int256(lockedMargin) + upl;
 
+            if (maxWithdrawableAmount < 0) amount = 0;
+            else amount = uint256(maxWithdrawableAmount);
+        }
+
+        require(amount > 0, "!amount > 0");
+        // this should never trigger, but we keep it in as fail safe
+        require(int256(lockedMargin) <= int256(balance - amount) + upl, "!equity");
+
+        store.decrementBalance(user, amount);
         store.transferOut(msg.sender, amount);
         emit Withdraw(msg.sender, amount);
     }

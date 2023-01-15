@@ -47,8 +47,6 @@ contract TradeTest is TestUtils {
         assertEq(_printOrders(flag), 2, "!orderCount");
         assertEq(_printUserPositions(user, flag), 0, "!positionCount");
 
-        console.log();
-
         // minSettlementTime is 1 minutes -> fast forward 2 minutes
         skip(2 minutes);
         trade.executeOrders();
@@ -103,33 +101,106 @@ contract TradeTest is TestUtils {
         trade.submitOrder(ethLong, 0, 0);
     }
 
-    function testRevertWithdraw() public {
-        vm.expectRevert("!amount");
-        trade.withdraw(0);
+    function testWithdraw() public {
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
 
+        // withdraw half
+        vm.expectEmit(true, true, true, true);
+        emit Withdraw(user, INITIAL_TRADE_DEPOSIT / 2);
+        trade.withdraw(INITIAL_TRADE_DEPOSIT / 2);
+
+        // trade balance should be half of initial balance
+        assertEq(store.getBalance(user), INITIAL_TRADE_DEPOSIT / 2);
+    }
+
+    function testWithdrawOverMaxBalance() public {
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // user withdraws more than deposited -> should receive deposited amount
+        vm.expectEmit(true, true, true, true);
+        emit Withdraw(user, INITIAL_TRADE_DEPOSIT);
+        trade.withdraw(MAX_UINT256);
+
+        // balance should be zero
+        assertEq(store.getBalance(user), 0);
+    }
+
+    function testWithdrawOverMaxBalancePositiveUPL() public {
+        // deposit 5000 USDC for trading
         trade.deposit(INITIAL_TRADE_DEPOSIT);
 
         // submit order, order.size 100k, margin 2k
         trade.submitOrder(ethLong, 0, 0);
 
-        // locked margin = 2000 USDC, orderfee = 100 USDC => withdrawing more than 2900 USDC shouldnt work
-        uint256 fee = _getOrderFee("ETH-USD", ethLong.size);
-        IStore.Order memory order = store.getOrder(1);
-        uint256 maxAmountToWithdraw = INITIAL_TRADE_DEPOSIT - order.margin - fee;
-        vm.expectRevert("!equity");
-        trade.withdraw(maxAmountToWithdraw + 1);
-
         // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        vm.stopPrank();
         skip(2 minutes);
         trade.executeOrders();
+        vm.startPrank(user);
 
-        // set eth price above 5k USD so trade is in profit
-        chainlink.setPrice(ethFeed, 5100 * UNIT);
+        // balance is now initial deposit - orderFee
+        uint256 fee = _getOrderFee("ETH-USD", ethLong.size);
 
-        // withdrawing should work
+        // set ETH price to ETH_TP_PRICE -> trade is 2k in profit (same as locked margin)
+        // if condition (int256(balance - amount) + upl < int256(lockedMargin)) returns zero
+        chainlink.setPrice(ethFeed, ETH_TP_PRICE);
+
+        // user should receive initial balance - fee
         vm.expectEmit(true, true, true, true);
-        emit Withdraw(user, maxAmountToWithdraw + 1);
-        trade.withdraw(maxAmountToWithdraw + 1);
+        emit Withdraw(user, INITIAL_TRADE_DEPOSIT - fee);
+        trade.withdraw(MAX_UINT256);
+
+        // balance should be zero
+        assertEq(store.getBalance(user), 0);
+    }
+
+    function testWithdrawOverMaxBalanceNegativeUPL() public {
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // submit order, order.size 100k, margin 2k
+        trade.submitOrder(ethLong, 0, 0);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        vm.stopPrank();
+        skip(2 minutes);
+        trade.executeOrders();
+        vm.startPrank(user);
+
+        // set ETH price to ETH_SL_PRICE -> trade is 2k in loss
+        // if condition (int256(balance - amount) + upl < int256(lockedMargin)) returns true
+        chainlink.setPrice(ethFeed, ETH_SL_PRICE);
+
+        // user should receive initial balance - lockedMargin - UPL - fee = 5k - 2k - 2k - 100 = 900 USDC
+        vm.expectEmit(true, true, true, true);
+        emit Withdraw(user, 900 * CURRENCY_UNIT);
+        trade.withdraw(MAX_UINT256);
+
+        // balance should be initial deposit - withdrawn amount - fee = 4000 USDC
+        assertEq(store.getBalance(user), 4000 * CURRENCY_UNIT);
+    }
+
+    function testRevertWithdraw() public {
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // submit order, order.size 100k, margin 2k
+        trade.submitOrder(ethLong, 0, 0);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        vm.stopPrank();
+        skip(2 minutes);
+        trade.executeOrders();
+        vm.startPrank(user);
+
+        // upl ~ -100k
+        chainlink.setPrice(ethFeed, 1);
+
+        // user shouldnt be able to withdraw (withdrawable amount is zero)
+        vm.expectRevert("!amount > 0");
+        trade.withdraw(MAX_UINT256);
     }
 
     function testRevertOrderType() public {
