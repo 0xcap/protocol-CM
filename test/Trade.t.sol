@@ -13,6 +13,52 @@ contract TradeTest is TestUtils {
         vm.startPrank(user);
     }
 
+    function testSubmitLimitOrder() public {
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+        
+        // submit ETH long limit order
+        trade.submitOrder(ethLongLimit, 0, 0);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        
+        uint256[] memory orderIdsToExecute = trade.getExecutableOrderIds();
+
+        // chainlinkPrice > order.price, limit order shouldnt be executable
+        assertEq(orderIdsToExecute.length, 0);
+
+        // set chainlinkprice below order price
+        chainlink.setPrice(ethFeed, ethLongLimit.price - 1 * UNIT);
+        
+        // order should be executable now
+        orderIdsToExecute = trade.getExecutableOrderIds();
+        assertEq(orderIdsToExecute[0], 1);
+    }
+
+    function testSubmitStopOrder() public {
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+        
+        // submit ETH long stop order
+        trade.submitOrder(ethLongStop, 0, 0);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        
+        uint256[] memory orderIdsToExecute = trade.getExecutableOrderIds();
+
+        // chainlinkPrice < order.price, stop order shouldnt be executable
+        assertEq(orderIdsToExecute.length, 0);
+
+        // set chainlinkprice above order price
+        chainlink.setPrice(ethFeed, ethLongStop.price + 1 * UNIT);
+        
+        // order should be executable now
+        orderIdsToExecute = trade.getExecutableOrderIds();
+        assertEq(orderIdsToExecute[0], 1);
+    }
+
     function testSubmitOrderMaxSize() public {
         IStore.Market memory market = store.getMarket("ETH-USD");
 
@@ -33,35 +79,126 @@ contract TradeTest is TestUtils {
         trade.submitOrder(btcLong, 0, 0);
     }
 
-    function testOrderAndPositionStorage() public {
+    function testSubmitOrderOverMaxSize() public {
+        IStore.Market memory market = store.getMarket("ETH-USD");
+
         // deposit 5000 USDC for trading
         trade.deposit(INITIAL_TRADE_DEPOSIT);
 
-        // submit ETH long with stop loss 2% below entry
-        trade.submitOrder(ethLong, 0, ETH_PRICE * 98 / 100);
+        // submit ETH long, order.size = MAX_UINT256 
+        ethLong.size = MAX_UINT256;
+        trade.submitOrder(ethLong, 0, 0);
 
-        // console.log orders and positions? true = yes, false = no
-        bool flag = false;
+        IStore.Order[] memory _orders = store.getOrders();
 
-        // should be two orders: ETH long and SL
-        assertEq(_printOrders(flag), 2, "!orderCount");
-        assertEq(_printUserPositions(user, flag), 0, "!positionCount");
+        // contract should set order.size to initial trade deposit * maxLeverage
+        assertEq(_orders[0].size, INITIAL_TRADE_DEPOSIT * market.maxLeverage);
+    }
 
-        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+    function testRevertOrderType() public {
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        ethLongLimit.price = ETH_PRICE + 100 * UNIT;
+
+        // orderType == 1 && isLong == true && chainLinkPrice <= order.price, should revert
+        vm.expectRevert("!orderType");
+        trade.submitOrder(ethLongLimit, 0, 0);
+    }
+
+    function testUpdateOrder() public {
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        trade.submitOrder(ethLongLimit, 0, 0);
+
+        // update order
+        trade.updateOrder(1, ETH_PRICE + 100 * UNIT);
+        IStore.Order[] memory _orders = store.getOrders();
+
+        // order type from 1 => 2
+        assertEq(_orders[0].orderType, 2);
+        // price should be 6000
+        assertEq(_orders[0].price, ETH_PRICE + 100 * UNIT);
+    }
+
+    function testRevertUpdateOrder() public {
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // submit ETH market long
+        trade.submitOrder(ethLong, 0, 0);
+        vm.expectRevert("!market-order");
+        trade.updateOrder(1, 5000);
+    }
+
+    function testCancelOrder() public {
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        trade.submitOrder(ethLongLimit, 0, 0);
+        trade.cancelOrder(1);
+
+        assertEq(store.getLockedMargin(user), 0, "!lockedMargin");
+
+        // fee should be credited back to user
+        assertEq(store.getBalance(user), INITIAL_TRADE_DEPOSIT, "!balance");
+
+        // order length should be zero
+        uint256 orderLength = _printOrders(false);
+        assertEq(orderLength, 0, "!orderLength");
+    }
+
+    function testExecuteCancelOrder() public {
+         trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // submit reduce only order without any open positions to reduce
+        trade.submitOrder(ethCloseLong, 0, 0);
+
+         // minSettlementTime is 1 minutes -> fast forward 2 minutes
         skip(2 minutes);
         trade.executeOrders();
 
-        // should be one SL order and one long position
-        assertEq(_printOrders(flag), 1, "!orderCount");
-        assertEq(_printUserPositions(user, flag), 1, "!positionCount");
+        // order should have been cancelled
+        uint256 orderLength = _printOrders(false);
+        uint256 posLength = _printUserPositions(user, false);
 
-        // set ETH price to SL price and execute SL order
-        chainlink.setPrice(ethFeed, ETH_PRICE * 98 / 100);
-        trade.executeOrders();
+        assertEq(orderLength, 0, "!orderLength");
+        assertEq(posLength, 0, "!posLength");
 
-        // should be zero orders, zero positions
-        assertEq(_printOrders(flag), 0, "!orderCount");
-        assertEq(_printUserPositions(user, flag), 0, "!positionCount");
+        // locked margin should be zero
+        assertEq(store.getLockedMargin(user), 0, "!lockedMargin");
+    }
+
+  function testExecutableOrderIds() public {
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // submit three orders:
+        // 1. eth long, is executable
+        // 2. take profit 2% above entry
+        // 3. stop loss at 2% below entry
+        trade.submitOrder(ethLong, ETH_PRICE * 102 / 100, ETH_PRICE * 98 / 100);
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+
+        uint256[] memory orderIdsToExecute = trade.getExecutableOrderIds();
+        assertEq(orderIdsToExecute[0], 1);
+        assertEq(orderIdsToExecute.length, 1);
+
+        // set chainlinkprice above TP price
+        chainlink.setPrice(ethFeed, ETH_PRICE * 102 / 100 + 1 * UNIT);
+        orderIdsToExecute = trade.getExecutableOrderIds();
+
+        // initial long order and TP order should be executable
+        assertEq(orderIdsToExecute[0], 1);
+        assertEq(orderIdsToExecute[1], 2);
+        assertEq(orderIdsToExecute.length, 2);
+
+        // set chainlinkprice below SL price
+        chainlink.setPrice(ethFeed, ETH_PRICE * 98 / 100 - 1 * UNIT);
+        orderIdsToExecute = trade.getExecutableOrderIds();
+
+        // initial long order and SL order should be executable
+        assertEq(orderIdsToExecute[0], 1);
+        assertEq(orderIdsToExecute[1], 3);
+        assertEq(orderIdsToExecute.length, 2);
     }
 
     function testExceedFreeMargin() public {
@@ -99,6 +236,37 @@ contract TradeTest is TestUtils {
         // submitting new orders shouldnt be possible
         vm.expectRevert("!equity");
         trade.submitOrder(ethLong, 0, 0);
+    }
+
+    function testOrderAndPositionStorage() public {
+        // deposit 5000 USDC for trading
+        trade.deposit(INITIAL_TRADE_DEPOSIT);
+
+        // submit ETH long with stop loss 2% below entry
+        trade.submitOrder(ethLong, 0, ETH_PRICE * 98 / 100);
+
+        // console.log orders and positions? true = yes, false = no
+        bool flag = false;
+
+        // should be two orders: ETH long and SL
+        assertEq(_printOrders(flag), 2, "!orderCount");
+        assertEq(_printUserPositions(user, flag), 0, "!positionCount");
+
+        // minSettlementTime is 1 minutes -> fast forward 2 minutes
+        skip(2 minutes);
+        trade.executeOrders();
+
+        // should be one SL order and one long position
+        assertEq(_printOrders(flag), 1, "!orderCount");
+        assertEq(_printUserPositions(user, flag), 1, "!positionCount");
+
+        // set ETH price to SL price and execute SL order
+        chainlink.setPrice(ethFeed, ETH_PRICE * 98 / 100);
+        trade.executeOrders();
+
+        // should be zero orders, zero positions
+        assertEq(_printOrders(flag), 0, "!orderCount");
+        assertEq(_printUserPositions(user, flag), 0, "!positionCount");
     }
 
     function testWithdraw() public {
@@ -201,87 +369,6 @@ contract TradeTest is TestUtils {
         // user shouldnt be able to withdraw (withdrawable amount is zero)
         vm.expectRevert("!amount > 0");
         trade.withdraw(MAX_UINT256);
-    }
-
-    function testRevertOrderType() public {
-        trade.deposit(INITIAL_TRADE_DEPOSIT);
-
-        ethLongLimit.price = 6000 * UNIT;
-
-        // orderType == 1 && isLong == true && chainLinkPrice <= order.price, should revert
-        vm.expectRevert("!orderType");
-        trade.submitOrder(ethLongLimit, 0, 0);
-    }
-
-    function testUpdateOrder() public {
-        trade.deposit(INITIAL_TRADE_DEPOSIT);
-
-        trade.submitOrder(ethLongLimit, 0, 0);
-
-        // update order
-        trade.updateOrder(1, 6000 * UNIT);
-        IStore.Order[] memory _orders = store.getOrders();
-
-        // order type from 1 => 2
-        assertEq(_orders[0].orderType, 2);
-        // price should be 6000
-        assertEq(_orders[0].price, 6000 * UNIT);
-    }
-
-    function testRevertUpdateOrder() public {
-        trade.deposit(INITIAL_TRADE_DEPOSIT);
-
-        // submit ETH market long
-        trade.submitOrder(ethLong, 0, 0);
-        vm.expectRevert("!market-order");
-        trade.updateOrder(1, 5000);
-    }
-
-    function testCancelOrder() public {
-        trade.deposit(INITIAL_TRADE_DEPOSIT);
-
-        trade.submitOrder(ethLongLimit, 0, 0);
-        trade.cancelOrder(1);
-
-        assertEq(store.getLockedMargin(user), 0);
-
-        // fee should be credited back to user
-        assertEq(store.getBalance(user), INITIAL_TRADE_DEPOSIT);
-    }
-
-    function testExecutableOrderIds() public {
-        trade.deposit(INITIAL_TRADE_DEPOSIT);
-
-        // submit three orders:
-        // 1. eth long, is executable
-        // 2. take profit 2% above entry
-        // 3. stop loss at 2% below entry
-        trade.submitOrder(ethLong, ETH_PRICE * 102 / 100, ETH_PRICE * 98 / 100);
-
-        // minSettlementTime is 1 minutes -> fast forward 2 minutes
-        skip(2 minutes);
-
-        uint256[] memory orderIdsToExecute = trade.getExecutableOrderIds();
-        assertEq(orderIdsToExecute[0], 1);
-        assertEq(orderIdsToExecute.length, 1);
-
-        // set chainlinkprice above TP price
-        chainlink.setPrice(ethFeed, ETH_PRICE * 102 / 100 + 1 * UNIT);
-        orderIdsToExecute = trade.getExecutableOrderIds();
-
-        // initial long order and TP order should be executable
-        assertEq(orderIdsToExecute[0], 1);
-        assertEq(orderIdsToExecute[1], 2);
-        assertEq(orderIdsToExecute.length, 2);
-
-        // set chainlinkprice below SL price
-        chainlink.setPrice(ethFeed, ETH_PRICE * 98 / 100 - 1 * UNIT);
-        orderIdsToExecute = trade.getExecutableOrderIds();
-
-        // initial long order and SL order should be executable
-        assertEq(orderIdsToExecute[0], 1);
-        assertEq(orderIdsToExecute[1], 3);
-        assertEq(orderIdsToExecute.length, 2);
     }
 
     function testClosePositionWithoutProfit() public {
