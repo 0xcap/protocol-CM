@@ -37,10 +37,24 @@ contract TestUtils is SetupTest {
         orderId: 0,
         user: address(0),
         market: "ETH-USD",
-        price: 4000,
+        price: ETH_PRICE - 100 * UNIT,
         isLong: true,
         isReduceOnly: false,
         orderType: 1, // 0 = market, 1 = limit, 2 = stop
+        margin: 0, // will be set in Trade.submitOrder (size / market.maxLeverage)
+        size: 100_000 * CURRENCY_UNIT,
+        fee: 0,
+        timestamp: 0
+    });
+
+    IStore.Order ethLongStop = IStore.Order({
+        orderId: 0,
+        user: address(0),
+        market: "ETH-USD",
+        price: ETH_PRICE + 100 * UNIT,
+        isLong: true,
+        isReduceOnly: false,
+        orderType: 2, // 0 = market, 1 = limit, 2 = stop
         margin: 0, // will be set in Trade.submitOrder (size / market.maxLeverage)
         size: 100_000 * CURRENCY_UNIT,
         fee: 0,
