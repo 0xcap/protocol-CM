@@ -98,7 +98,7 @@ contract Pool is IPool {
         uint256 amountMinusFee = amount - feeAmount;
 
         // CLP amount
-        uint256 clpAmount = amountMinusFee * clpSupply / balance;
+        uint256 clpAmount = amount * clpSupply / balance;
 
         store.decrementPoolBalance(amountMinusFee);
         store.burnCLP(user, clpAmount);

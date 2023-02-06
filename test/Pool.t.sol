@@ -21,11 +21,11 @@ contract PoolTest is TestUtils {
 
     function setUp() public virtual override {
         super.setUp();
-
-        _submitAndExecuteOrders();
     }
 
     function testCreditTraderLoss() public {
+        _submitAndExecuteOrders();
+
         // set ETH price to stop loss price, stop loss order should execute
         chainlink.setPrice(ethFeed, ETH_SL_PRICE);
 
@@ -60,6 +60,8 @@ contract PoolTest is TestUtils {
     }
 
     function testDebitTraderProfit() public {
+        _submitAndExecuteOrders();
+
         // add pool liquidity
         pool.addLiquidity(5000 * CURRENCY_UNIT);
         // set msg.sender = trade contract to set buffer balance
@@ -90,6 +92,8 @@ contract PoolTest is TestUtils {
     }
 
     function testCreditFee() public {
+        _submitAndExecuteOrders();
+
         // ETH and BTC Long are executed, position size is 10k each, fee is 10 USDC each
         uint256 fee = _getOrderFee("ETH-USD", ethLong.size) + _getOrderFee("BTC-USD", btcLong.size);
         uint256 keeperFee = fee * store.keeperFeeShare() / BPS_DIVIDER;
@@ -103,6 +107,8 @@ contract PoolTest is TestUtils {
     }
 
     function testRevertPoolBalance() public {
+        _submitAndExecuteOrders();
+
         // add pool liquidity
         pool.addLiquidity(1000 * CURRENCY_UNIT);
         assertGt(store.poolBalance(), 1000 * CURRENCY_UNIT, "!poolBalance");
@@ -119,31 +125,21 @@ contract PoolTest is TestUtils {
     function testFuzzAddAndRemoveLiquidity(uint256 amount) public {
         vm.assume(amount > 1 * CURRENCY_UNIT && amount <= INITIAL_BALANCE);
 
-        // one ETH long and one BTC long is already executed
-        uint256 fee = _getOrderFee("ETH-USD", ethLong.size) + _getOrderFee("BTC-USD", btcLong.size);
-        uint256 keeperFee = fee * store.keeperFeeShare() / BPS_DIVIDER;
-        fee -= keeperFee;
-        uint256 poolFee = fee * store.poolFeeShare() / BPS_DIVIDER;
-
         // expect AddLiquidity event
         vm.expectEmit(true, true, true, true);
-        emit AddLiquidity(user, amount, amount, amount + poolFee);
+        emit AddLiquidity(user, amount, amount, amount);
         vm.prank(user);
         pool.addLiquidity(amount);
 
-        // pool balance should be equal to amount + fees
-        assertEq(store.poolBalance(), amount + poolFee, "!poolBalance");
+        // pool balance should be equal to amount
+        assertEq(store.poolBalance(), amount, "!poolBalance");
 
         uint256 feeAmount = amount * store.poolWithdrawalFee() / BPS_DIVIDER;
-        uint256 amountMinusFee = amount - feeAmount;
 
         // CLP amount
         uint256 balance = store.poolBalance();
         uint256 clpSupply = store.getCLPSupply();
-        uint256 clpAmount = amountMinusFee * clpSupply / balance;
-
-        console.log("poolFee", poolFee);
-        console.log("feeAMount", feeAmount);
+        uint256 clpAmount = amount * clpSupply / balance;
 
         // CLP should be burned
         vm.expectEmit(true, true, true, true);
@@ -151,8 +147,10 @@ contract PoolTest is TestUtils {
 
         // expect RemoveLiquidity event
         vm.expectEmit(true, true, true, true);
-        emit RemoveLiquidity(user, amount, feeAmount, clpAmount, poolFee + feeAmount);
+        emit RemoveLiquidity(user, amount, feeAmount, clpAmount, feeAmount);
         vm.prank(user);
         pool.removeLiquidity(amount);
+
+        assertEq(store.getUserPoolBalance(user), 0);
     }
 }
